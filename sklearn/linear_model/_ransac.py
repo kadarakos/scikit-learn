@@ -392,7 +392,8 @@ class RANSACRegressor(
                 "`min_samples` may not be larger than number "
                 "of samples: n_samples = %d." % (X.shape[0])
             )
-
+        # Need to ensure its an integer for the random_state.choice.
+        min_samples = int(min_samples)
         if self.residual_threshold is None:
             # MAD (median absolute deviation)
             residual_threshold = np.median(np.abs(y - np.median(y)))
@@ -424,27 +425,15 @@ class RANSACRegressor(
         except ValueError:
             pass
 
-        estimator_fit_has_sample_weight = has_fit_parameter(estimator, "sample_weight")
-        estimator_name = type(estimator).__name__
-        if sample_weight is not None and not estimator_fit_has_sample_weight:
-            raise ValueError(
-                "%s does not support sample_weight. Sample"
-                " weights are only used for the calibration"
-                " itself." % estimator_name
-            )
-
-        if sample_weight is not None:
-            fit_params["sample_weight"] = sample_weight
-
+        # XXX Seems like we are not going to need to route params
+        # if we do not route the sample_weight.
         if _routing_enabled():
             routed_params = process_routing(self, "fit", **fit_params)
         else:
             routed_params = Bunch()
             routed_params.estimator = Bunch(fit={}, predict={}, score={})
-            if sample_weight is not None:
-                sample_weight = _check_sample_weight(sample_weight, X)
-                routed_params.estimator.fit = {"sample_weight": sample_weight}
 
+        sample_weight = _check_sample_weight(sample_weight, X)
         n_inliers_best = 1
         score_best = -np.inf
         inlier_mask_best = None
@@ -472,8 +461,11 @@ class RANSACRegressor(
                 break
 
             # choose random sample set
-            subset_idxs = sample_without_replacement(
-                n_samples, min_samples, random_state=random_state
+            # Normalize sample_weight to probabilities.
+            sample_probs = sample_weight / sample_weight.sum()
+            # XXX Not sure if 'min_samples' is the appropriate size?
+            subset_idxs = random_state.choice(
+                  n_samples, size=min_samples, replace=True, p=sample_probs
             )
             X_subset = X[subset_idxs]
             y_subset = y[subset_idxs]
